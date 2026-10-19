@@ -15,11 +15,14 @@ void dish();
 char * readline(void);
 char ** parse(char*,int * num );
 int exec (char **);
-int run (char **);
+int run (char **,int *size);
 int cd (char **);
 int num_builtins();
-int handle_pipe(char **, int * num, char *delim);
+int handle_delim(char **, int * num, char *delim);
 int exec_pip(char*** commands, int first_size, int second_size, int splits_found);
+int exec_redir_out(char*** commands, int first_size, int second_size, int splits_found);
+int handle_redirect(char ** );
+int find_size(char **);
 
 
 

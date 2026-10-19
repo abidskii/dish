@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -22,35 +23,44 @@ int cd(char** args) {
 	}
 	return 1;
 }
-int run(char** args) {
+int run(char** args, int* size) {
 
+	// Check for built in commands
 	for (int i = 0; i < num_builtins(); i++) {
 		if (strcmp(args[0], builtins[i]) == 0) {
 			return (*builtins_func[i])(args);
 		}
 	}
-	return exec(args);
+
+	// Check for pipes
+	if (handle_delim(args, size, "|") == 0) {
+		exec(args);
+	}
+	return 1;
 }
 
 int exec(char** args) {
 
-	pid_t pid = fork();
-	pid_t wpid;
-	int status;
-	if (pid == 0) {
-		if (execvp(args[0], args) == -1) {
+	if (handle_redirect(args) == 0) {
+		pid_t pid = fork();
+		pid_t wpid;
+		int status;
+		if (pid == 0) {
+			if (execvp(args[0], args) == -1) {
+				perror("dish");
+			}
+			exit(EXIT_FAILURE);
+
+		} else if (pid > 0) {
+			// Parent process
+			do {
+				wpid = waitpid(pid, &status, WUNTRACED);
+			} while (!WIFEXITED(status) && !WIFSIGNALED(status));
+
+		} else {
 			perror("dish");
 		}
-		exit(EXIT_FAILURE);
-
-	} else if (pid > 0) {
-		// Parent process
-		do {
-			wpid = waitpid(pid, &status, WUNTRACED);
-		} while (!WIFEXITED(status) && !WIFSIGNALED(status));
-
-	} else {
-		perror("dish");
+		return 1;
 	}
 	return 1;
 }
@@ -87,11 +97,109 @@ int handle_delim(char** args, int* size, char* delim) {
 		//		printf("%d %d\n", splits_found, split_index);
 		split_index++;
 	}
+
 	if (splits_found == 0) {
 		return 0;
-	} else if (*delim == '|') {
+	}
+
+	if (*delim == '|') {
 		exec_pip(commands, splits_found + 1, split_index, splits_found);
 	}
+
+	return 1;
+}
+
+int exec_redir_out(char*** commands, int first_size, int second_size, int splits_found) {
+
+	int fd[2];
+	int file_no;
+	pid_t pid;
+	FILE* file_ptr;
+
+	if (pipe(fd) != 0) {
+		perror("dish");
+	}
+
+	pid = fork();
+
+	if (pid == 0) {
+
+		file_ptr = fopen(commands[0][0], "w");
+		file_no = fileno(file_ptr);
+
+		dup2(file_no, STDOUT_FILENO);
+
+		fclose(file_ptr);
+		execvp(commands[0][0], commands[0]);
+
+	} else {
+	}
+
+	return 1;
+}
+
+int find_size(char** command) {
+
+	int i = 0;
+
+	while (command[i] != NULL) {
+
+		i++;
+	}
+	return i;
+}
+
+int handle_redirect(char** command) {
+
+	// Create a array of arguments that is split by redirets
+
+	int size = find_size(command);
+	printf("%d", size);
+
+	char*** args = malloc(size * sizeof(char**));
+
+	for (int k = 0; k < size; k++) {
+		args[k] = malloc((size + 1) * sizeof(char*)); // room for *size words + NULL
+	}
+	char** redirects = malloc(0);
+	int redirects_found = 0;
+
+	for (int i = 0; i < size; i++) {
+
+		if (strcmp(command[i], "<") == 0) {
+
+			redirects_found++;
+			redirects = realloc(redirects, redirects_found * sizeof(char*));
+			redirects[redirects_found - 1] = command[i];
+			continue;
+
+		} else if (strcmp(command[i], ">") == 0) {
+
+			redirects_found++;
+			redirects = realloc(redirects, redirects_found * sizeof(char*));
+			redirects[redirects_found - 1] = command[i];
+			continue;
+
+		} else if (strcmp(command[i], ">>") == 0) {
+
+			redirects_found++;
+			redirects = realloc(redirects, redirects_found * sizeof(char*));
+			redirects[redirects_found - 1] = command[i];
+			continue;
+		}
+
+		args[redirects_found][i] = command[i];
+	}
+	for (int k = 0; k < redirects_found; k++) {
+		for (int j = 0; args[k][j] != NULL; j++) {
+			printf("commands[%d][%d] = %s\n", k, j, args[k][j]);
+		}
+	}
+
+	if (redirects_found == 0) {
+		return 0;
+	}
+
 	return 1;
 }
 
@@ -114,6 +222,11 @@ int exec_pip(char*** commands, int first_size, int second_size, int splits_found
 
 		if (pipe(fd) != 0) {
 			perror("dish");
+		}
+
+		// Check for redirect
+
+		if (handle_redirect(commands[i]) == 1) {
 		}
 
 		pid = fork();
@@ -213,10 +326,8 @@ void dish() {
 
 	args = parse(input, &args_num);
 
-	if (handle_delim(args, &args_num, "|") == 0) {
-		run(args);
-	} else if (handle_delim(args, &args_num, ">") || handle_delim(args, &args_num, ">>") || handle_delim(args, &args_num, "<") || handle_delim(args, &args_num, "<<")) {
-	}
+	run(args, &args_num);
+
 	free(input);
 	free(args);
 }

@@ -1,6 +1,9 @@
 #include "shell.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <string.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -109,43 +112,56 @@ int handle_delim(char** args, int* size, char* delim) {
 	return 1;
 }
 
-int exec_redir_out(char*** commands, int first_size, int second_size, int splits_found) {
+int exec_redir(char*** commands, int first_size, int splits_found, char** delims) {
 
 	int fd[2];
-	int file_no;
-	pid_t pid;
-	FILE* file_ptr;
 
-	if (pipe(fd) != 0) {
-		perror("dish");
+	pipe(fd);
+
+	int descriptor = open(commands[1][0], O_WRONLY | O_CREAT | O_TRUNC, 0644);
+
+	int fd2;
+
+	if (strcmp(delims[0], ">")) {
+		fd2 = STDOUT_FILENO;
+	} else if (strcmp(delims[0], "<")) {
+		fd2 = STDIN_FILENO;
+	} else if (strcmp(delims[0], ">>")) {
+		fd2 = STDIN_FILENO;
 	}
 
-	pid = fork();
-
-	if (pid == 0) {
-
-		file_ptr = fopen(commands[0][0], "w");
-		file_no = fileno(file_ptr);
-
-		dup2(file_no, STDOUT_FILENO);
-
-		fclose(file_ptr);
-		execvp(commands[0][0], commands[0]);
-
-	} else {
-	}
+	dup2(descriptor, fd2);
 
 	return 1;
 }
 
-int find_size(char** command) {
+int find_size_and_check_for_redirect(char** command) {
 
 	int i = 0;
 
+	int redirects_found = 0;
+
 	while (command[i] != NULL) {
 
+		if (strcmp(command[i], "<") == 0) {
+
+			redirects_found++;
+
+		} else if (strcmp(command[i], ">") == 0) {
+
+			redirects_found++;
+
+		} else if (strcmp(command[i], ">>") == 0) {
+
+			redirects_found++;
+		}
 		i++;
 	}
+
+	if (redirects_found == 0) {
+		return -1;
+	}
+
 	return i;
 }
 
@@ -153,7 +169,11 @@ int handle_redirect(char** command) {
 
 	// Create a array of arguments that is split by redirets
 
-	int size = find_size(command);
+	int size = find_size_and_check_for_redirect(command);
+
+	if (size == -1) {
+		return 0;
+	}
 	printf("%d", size);
 
 	char*** args = malloc(size * sizeof(char**));
@@ -163,6 +183,7 @@ int handle_redirect(char** command) {
 	}
 	char** redirects = malloc(0);
 	int redirects_found = 0;
+	int second_dimension_pointer = 0;
 
 	for (int i = 0; i < size; i++) {
 
@@ -171,6 +192,8 @@ int handle_redirect(char** command) {
 			redirects_found++;
 			redirects = realloc(redirects, redirects_found * sizeof(char*));
 			redirects[redirects_found - 1] = command[i];
+			second_dimension_pointer = 0;
+			args[redirects_found][second_dimension_pointer] = command[i];
 			continue;
 
 		} else if (strcmp(command[i], ">") == 0) {
@@ -178,6 +201,8 @@ int handle_redirect(char** command) {
 			redirects_found++;
 			redirects = realloc(redirects, redirects_found * sizeof(char*));
 			redirects[redirects_found - 1] = command[i];
+			second_dimension_pointer = 0;
+			args[redirects_found][second_dimension_pointer] = command[i];
 			continue;
 
 		} else if (strcmp(command[i], ">>") == 0) {
@@ -185,19 +210,17 @@ int handle_redirect(char** command) {
 			redirects_found++;
 			redirects = realloc(redirects, redirects_found * sizeof(char*));
 			redirects[redirects_found - 1] = command[i];
+			second_dimension_pointer = 0;
+			args[redirects_found][second_dimension_pointer] = command[i];
 			continue;
 		}
 
-		args[redirects_found][i] = command[i];
-	}
-	for (int k = 0; k < redirects_found; k++) {
-		for (int j = 0; args[k][j] != NULL; j++) {
-			printf("commands[%d][%d] = %s\n", k, j, args[k][j]);
-		}
+		args[redirects_found][second_dimension_pointer] = command[i];
+		second_dimension_pointer++;
 	}
 
-	if (redirects_found == 0) {
-		return 0;
+	for (int i = 0; i < redirects_found; i++) {
+		printf("redirects[%d] = %s\n", i, redirects[i]);
 	}
 
 	return 1;
@@ -227,6 +250,7 @@ int exec_pip(char*** commands, int first_size, int second_size, int splits_found
 		// Check for redirect
 
 		if (handle_redirect(commands[i]) == 1) {
+			continue;
 		}
 
 		pid = fork();

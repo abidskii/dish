@@ -20,9 +20,9 @@ int cd (char **);
 int num_builtins();
 int handle_delim(char **, int * num, char *delim);
 int exec_pip(char*** commands, int first_size, int second_size, int splits_found);
-int exec_redir_out(char*** commands, int first_size, int second_size, int splits_found);
+int exec_redir(char*** commands, int first_size, int splits_found, char ** delims);
 int handle_redirect(char ** );
-int find_size(char **);
+int find_size_and_check_for_redirect(char **);
 
 
 

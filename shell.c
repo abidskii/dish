@@ -37,7 +37,11 @@ int run(char** args, int* size) {
 
 	// Check for pipes
 	if (handle_delim(args, size, "|") == 0) {
-		exec(args);
+
+		if (handle_redirect(args) == 0) {
+
+			exec(args);
+		}
 	}
 	return 1;
 }
@@ -114,23 +118,43 @@ int handle_delim(char** args, int* size, char* delim) {
 
 int exec_redir(char*** commands, int first_size, int splits_found, char** delims) {
 
-	int fd[2];
+	for (int i = 0; i < first_size; i++) {
 
-	pipe(fd);
+		if (i == 1) {
+			continue;
+		}
 
-	int descriptor = open(commands[1][0], O_WRONLY | O_CREAT | O_TRUNC, 0644);
+		int fd[2];
 
-	int fd2;
+		int descriptor;
+		if (i == 0) {
+			descriptor = open(commands[1][0], O_WRONLY | O_CREAT | O_TRUNC, 0644);
+		}
 
-	if (strcmp(delims[0], ">")) {
-		fd2 = STDOUT_FILENO;
-	} else if (strcmp(delims[0], "<")) {
-		fd2 = STDIN_FILENO;
-	} else if (strcmp(delims[0], ">>")) {
-		fd2 = STDIN_FILENO;
+		int fd2;
+
+		if (strcmp(delims[0], ">") == 0) {
+			fd2 = STDOUT_FILENO;
+		} else if (strcmp(delims[0], "<") == 0) {
+			fd2 = STDIN_FILENO;
+		} else if (strcmp(delims[0], ">>") == 0) {
+			fd2 = STDOUT_FILENO; // was STDIN_FILENO: append writes to stdout too
+		}
+
+		pid_t pid;
+		pid = fork();
+		if (pid == 0) {
+			dup2(descriptor, fd2);
+
+			close(descriptor);
+			execvp(commands[0][0], commands[0]);
+			perror("dish");
+			exit(EXIT_FAILURE);
+
+		} else {
+			waitpid(pid, NULL, 0);
+		}
 	}
-
-	dup2(descriptor, fd2);
 
 	return 1;
 }
@@ -174,7 +198,6 @@ int handle_redirect(char** command) {
 	if (size == -1) {
 		return 0;
 	}
-	printf("%d", size);
 
 	char*** args = malloc(size * sizeof(char**));
 
@@ -219,9 +242,7 @@ int handle_redirect(char** command) {
 		second_dimension_pointer++;
 	}
 
-	for (int i = 0; i < redirects_found; i++) {
-		printf("redirects[%d] = %s\n", i, redirects[i]);
-	}
+	exec_redir(args, redirects_found + 1, redirects_found, redirects);
 
 	return 1;
 }

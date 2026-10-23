@@ -11,7 +11,7 @@
 #include <sys/wait.h>
 
 
-void dish();
+int dish();
 char * readline(void);
 char ** parse(char*,int * num );
 int exec (char **);
@@ -24,6 +24,7 @@ int exec_redir(char*** commands, int first_size, int splits_found, char ** delim
 int handle_redirect(char ** );
 int find_size_and_check_for_redirect(char **);
 void on_sigint(int sig);
+int dish_exit(char** args);
 
 
 

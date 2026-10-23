@@ -1,6 +1,7 @@
 #include "shell.h"
 #include <stdio.h>
 #include <signal.h>
+#include <errno.h>
 #include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -12,8 +13,8 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-char* builtins[] = { "cd" };
-int (*builtins_func[])(char**) = { &cd };
+char* builtins[] = { "cd", "exit" };
+int (*builtins_func[])(char**) = { &cd, &dish_exit };
 
 int num_builtins() { return sizeof(builtins) / sizeof(char*); }
 
@@ -29,6 +30,12 @@ int cd(char** args) {
 	}
 	return 1;
 }
+
+int dish_exit(char** args) {
+	write(STDOUT_FILENO, "\n", 1);
+	return 0;
+}
+
 int run(char** args, int* size) {
 
 	// Check for built in commands
@@ -55,7 +62,6 @@ int exec(char** args) {
 	pid_t wpid;
 	int status;
 	if (pid == 0) {
-
 		if (execvp(args[0], args) == -1) {
 			perror("dish");
 		}
@@ -63,10 +69,9 @@ int exec(char** args) {
 
 	} else if (pid > 0) {
 		// Parent process
-		do {
-			wpid = waitpid(pid, &status, WUNTRACED);
-		} while (!WIFEXITED(status) && !WIFSIGNALED(status));
 
+		while (waitpid(pid, &status, 0) == -1 && errno == EINTR)
+			;
 	} else {
 		perror("dish");
 	}
@@ -296,6 +301,8 @@ int exec_pip(char*** commands, int first_size, int second_size, int splits_found
 			close(fd[0]);
 			close(fd[1]);
 			execvp(commands[i][0], commands[i]);
+			perror("dish");
+			exit(EXIT_FAILURE);
 		}
 		if (prev_read != -1) {
 			close(prev_read);
@@ -313,7 +320,8 @@ int exec_pip(char*** commands, int first_size, int second_size, int splits_found
 	close(fd[0]);
 	close(fd[1]);
 	for (int i = 0; i < first_size; i++) {
-		waitpid(pids[i], NULL, 0);
+		while (waitpid(pids[i], NULL, 0) == -1 && errno == EINTR)
+			;
 	}
 
 	return 0;
@@ -351,8 +359,18 @@ char* readline() {
 
 	while (1) {
 
+		errno = 0;
 		ch = getchar();
 
+		if (ch == EOF && errno == EINTR) {
+			clearerr(stdin);
+			i = 0;
+			break;
+		}
+		if (ch == EOF && i == 0) {
+			free(buffer);
+			return NULL;
+		}
 		if (i > buffer_size - 1) {
 			buffer_size += READ_SIZE;
 			buffer = realloc(buffer, buffer_size);
@@ -368,7 +386,7 @@ char* readline() {
 	return buffer;
 }
 
-void dish() {
+int dish() {
 
 	char* input;
 	char** args;
@@ -376,13 +394,22 @@ void dish() {
 
 	input = readline();
 
+	if (input == NULL) {
+		putchar('\n');
+		return 0;
+	}
+
 	args = parse(input, &args_num);
 	if (args_num > 0) {
-		run(args, &args_num);
+		if (run(args, &args_num) == 0) {
+			return 0;
+		}
 	}
 
 	free(input);
 	free(args);
+
+	return 1;
 }
 
 void on_sigint(int sig) {
@@ -399,8 +426,7 @@ int main(int argc, char* argv[]) {
 	sigaction(SIGINT, &sa, NULL);
 	sa.sa_handler = on_sigint;
 
-	while (1) {
-		dish();
+	while (dish()) {
 	}
 
 	return EXIT_SUCCESS;

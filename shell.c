@@ -289,7 +289,6 @@ int exec_pip(char*** commands, int first_size, int second_size, int splits_found
 			} else if (i == first_size - 1) {
 				dup2(prev_read, STDIN_FILENO);
 			} else {
-
 				dup2(prev_read, STDIN_FILENO);
 				dup2(fd[1], STDOUT_FILENO);
 			}
@@ -316,6 +315,7 @@ int exec_pip(char*** commands, int first_size, int second_size, int splits_found
 	for (int i = 0; i < first_size; i++) {
 		waitpid(pids[i], NULL, 0);
 	}
+
 	return 0;
 }
 
@@ -377,8 +377,9 @@ void dish() {
 	input = readline();
 
 	args = parse(input, &args_num);
-
-	run(args, &args_num);
+	if (args_num > 0) {
+		run(args, &args_num);
+	}
 
 	free(input);
 	free(args);

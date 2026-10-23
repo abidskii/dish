@@ -1,5 +1,8 @@
 #include "shell.h"
 #include <stdio.h>
+#include <signal.h>
+#include <unistd.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -48,26 +51,24 @@ int run(char** args, int* size) {
 
 int exec(char** args) {
 
-	if (handle_redirect(args) == 0) {
-		pid_t pid = fork();
-		pid_t wpid;
-		int status;
-		if (pid == 0) {
-			if (execvp(args[0], args) == -1) {
-				perror("dish");
-			}
-			exit(EXIT_FAILURE);
+	pid_t pid = fork();
+	pid_t wpid;
+	int status;
+	if (pid == 0) {
 
-		} else if (pid > 0) {
-			// Parent process
-			do {
-				wpid = waitpid(pid, &status, WUNTRACED);
-			} while (!WIFEXITED(status) && !WIFSIGNALED(status));
-
-		} else {
+		if (execvp(args[0], args) == -1) {
 			perror("dish");
 		}
-		return 1;
+		exit(EXIT_FAILURE);
+
+	} else if (pid > 0) {
+		// Parent process
+		do {
+			wpid = waitpid(pid, &status, WUNTRACED);
+		} while (!WIFEXITED(status) && !WIFSIGNALED(status));
+
+	} else {
+		perror("dish");
 	}
 	return 1;
 }
@@ -126,19 +127,25 @@ int exec_redir(char*** commands, int first_size, int splits_found, char** delims
 
 		int fd[2];
 
-		int descriptor;
-		if (i == 0) {
-			descriptor = open(commands[1][0], O_WRONLY | O_CREAT | O_TRUNC, 0644);
-		}
-
 		int fd2;
+		int flags;
 
 		if (strcmp(delims[0], ">") == 0) {
 			fd2 = STDOUT_FILENO;
+			flags = O_WRONLY | O_CREAT | O_TRUNC;
+		} else if (strcmp(delims[0], ">>") == 0) {
+			fd2 = STDOUT_FILENO;
+			flags = O_WRONLY | O_CREAT | O_APPEND;
 		} else if (strcmp(delims[0], "<") == 0) {
 			fd2 = STDIN_FILENO;
-		} else if (strcmp(delims[0], ">>") == 0) {
-			fd2 = STDOUT_FILENO; // was STDIN_FILENO: append writes to stdout too
+			flags = O_RDONLY;
+		}
+
+		int descriptor;
+		descriptor = open(commands[1][0], O_WRONLY | O_CREAT | O_TRUNC, 0644);
+		if (descriptor == -1) {
+			perror(commands[1][0]);
+			return 1;
 		}
 
 		pid_t pid;
@@ -377,7 +384,19 @@ void dish() {
 	free(args);
 }
 
+void on_sigint(int sig) {
+	(void)sig;
+	write(STDOUT_FILENO, "\n", 1);
+}
+
 int main(int argc, char* argv[]) {
+
+	struct sigaction sa;
+	sa.sa_handler = on_sigint;
+	sigemptyset(&sa.sa_mask);
+	sa.sa_flags = 0;
+	sigaction(SIGINT, &sa, NULL);
+	sa.sa_handler = on_sigint;
 
 	while (1) {
 		dish();

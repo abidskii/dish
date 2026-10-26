@@ -1,6 +1,3 @@
-a.out
-README.md
-shell.c
-shell.h
-test
-text.txt
+hello
+mine
+trap

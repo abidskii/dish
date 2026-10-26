@@ -22,6 +22,7 @@ int cd(char** args) {
 
 	if (args[1] == NULL) {
 		fprintf(stderr, "expected argument to \"cd\"\n");
+		return 1;
 	}
 
 	int res = chdir(args[1]);
@@ -80,28 +81,20 @@ int exec(char** args) {
 
 int handle_delim(char** args, int* size, char* delim) {
 
-	char*** commands = malloc(*size * sizeof(char**));
+	char*** commands = calloc(*size, sizeof(char**));
 	for (int k = 0; k < *size; k++) {
-		commands[k] = malloc((*size + 1) * sizeof(char*)); // room for *size words + NULL
+		commands[k] = calloc((*size + 1), sizeof(char*)); // room for *size words + NULL
 	}
 
-	int* pipes = malloc(0);
 	int splits_found = 0;
-	char* pipe_output;
 
 	// Splits output
-	char* output = NULL;
-	char buf[256];
-	ssize_t prev_size = 0;
-	ssize_t n;
 	int split_index = 0;
 
 	for (int i = 0; i < *size; i++) {
 
 		if (strcmp(args[i], delim) == 0) {
 			splits_found += 1;
-			pipes = realloc(pipes, splits_found * sizeof(int));
-			pipes[i - 1] = i;
 			split_index = 0;
 			continue;
 		}
@@ -117,55 +110,6 @@ int handle_delim(char** args, int* size, char* delim) {
 
 	if (*delim == '|') {
 		exec_pip(commands, splits_found + 1, split_index, splits_found);
-	}
-
-	return 1;
-}
-
-int exec_redir(char*** commands, int first_size, int splits_found, char** delims) {
-
-	for (int i = 0; i < first_size; i++) {
-
-		if (i == 1) {
-			continue;
-		}
-
-		int fd[2];
-
-		int fd2;
-		int flags;
-
-		if (strcmp(delims[0], ">") == 0) {
-			fd2 = STDOUT_FILENO;
-			flags = O_WRONLY | O_CREAT | O_TRUNC;
-		} else if (strcmp(delims[0], ">>") == 0) {
-			fd2 = STDOUT_FILENO;
-			flags = O_WRONLY | O_CREAT | O_APPEND;
-		} else if (strcmp(delims[0], "<") == 0) {
-			fd2 = STDIN_FILENO;
-			flags = O_RDONLY;
-		}
-
-		int descriptor;
-		descriptor = open(commands[1][0], O_WRONLY | O_CREAT | O_TRUNC, 0644);
-		if (descriptor == -1) {
-			perror(commands[1][0]);
-			return 1;
-		}
-
-		pid_t pid;
-		pid = fork();
-		if (pid == 0) {
-			dup2(descriptor, fd2);
-
-			close(descriptor);
-			execvp(commands[0][0], commands[0]);
-			perror("dish");
-			exit(EXIT_FAILURE);
-
-		} else {
-			waitpid(pid, NULL, 0);
-		}
 	}
 
 	return 1;
@@ -201,22 +145,26 @@ int find_size_and_check_for_redirect(char** command) {
 	return i;
 }
 
-int handle_redirect(char** command) {
+int extract_redirects(char** command) {
 
 	// Create a array of arguments that is split by redirets
 
 	int size = find_size_and_check_for_redirect(command);
 
+	int com = 0;
+	int in = 1;
+	int out = 2;
+
 	if (size == -1) {
 		return 0;
 	}
 
-	char*** args = malloc(size * sizeof(char**));
+	char*** args = calloc(size, sizeof(char**));
 
 	for (int k = 0; k < size; k++) {
-		args[k] = malloc((size + 1) * sizeof(char*)); // room for *size words + NULL
+		args[k] = calloc((size + 1), sizeof(char*)); // room for *size words + NULL
 	}
-	char** redirects = malloc(0);
+	char** redirects = calloc(0, 0);
 	int redirects_found = 0;
 	int second_dimension_pointer = 0;
 
@@ -228,7 +176,7 @@ int handle_redirect(char** command) {
 			redirects = realloc(redirects, redirects_found * sizeof(char*));
 			redirects[redirects_found - 1] = command[i];
 			second_dimension_pointer = 0;
-			args[redirects_found][second_dimension_pointer] = command[i];
+			args[in][0] = command[i];
 			continue;
 
 		} else if (strcmp(command[i], ">") == 0) {
@@ -259,6 +207,69 @@ int handle_redirect(char** command) {
 	return 1;
 }
 
+int exec_redir(char*** commands, int first_size, int redirect_found, char** delims) {
+
+	int fd[2];
+
+	int flags = 0;
+	char** in_file = NULL;
+	char** out_file = NULL;
+
+	for (int i = 0; i < redirect_found; i++) {
+
+		if (strcmp(delims[i], ">") == 0) {
+			out_file = commands[i + 1];
+			flags = O_WRONLY | O_CREAT | O_TRUNC;
+		} else if (strcmp(delims[i], ">>") == 0) {
+			out_file = commands[i + 1];
+			flags = O_WRONLY | O_CREAT | O_APPEND;
+		} else if (strcmp(delims[i], "<") == 0) {
+			in_file = commands[i + 1];
+		}
+	}
+
+	int descriptor_in = -1;
+	int descriptor_out = -1;
+
+	if (in_file != NULL) {
+		descriptor_in = open(in_file[0], O_RDONLY);
+	}
+	if (out_file != NULL) {
+		descriptor_out = open(out_file[0], flags, 0644);
+	}
+
+	if ((in_file != NULL && descriptor_in == -1) || (out_file != NULL && descriptor_out == -1)) {
+		perror("dish");
+		return 1;
+	}
+
+	pid_t pid;
+	pid = fork();
+	if (pid == 0) {
+
+		if (descriptor_in != -1) {
+			dup2(descriptor_in, STDIN_FILENO);
+			close(descriptor_in);
+		}
+		if (descriptor_out != -1) {
+			dup2(descriptor_out, STDOUT_FILENO);
+			close(descriptor_out);
+		}
+
+		execvp(commands[0][0], commands[0]);
+		perror("dish");
+		exit(EXIT_FAILURE);
+
+	} else {
+		waitpid(pid, NULL, 0);
+		if (descriptor_in != -1)
+			close(descriptor_in);
+		if (descriptor_out != -1)
+			close(descriptor_out);
+	}
+
+	return 1;
+}
 int exec_pip(char*** commands, int first_size, int second_size, int splits_found) {
 
 	int fd[2];
@@ -269,10 +280,6 @@ int exec_pip(char*** commands, int first_size, int second_size, int splits_found
 	pid_t wpid;
 	pid_t pid;
 	pid_t pids[first_size];
-
-	if (pipe(fd) != 0) {
-		perror("dish");
-	}
 
 	for (int i = 0; i < first_size; i++) {
 
@@ -329,20 +336,21 @@ int exec_pip(char*** commands, int first_size, int second_size, int splits_found
 
 char** parse(char* input, int* size) {
 	int tok_bufsize = TOK_BUFSIZE;
-	char** args = malloc(TOK_BUFSIZE * sizeof(char*));
+	char** args = calloc(TOK_BUFSIZE, sizeof(char*));
 	char* token = strtok(input, TOK_DELIM);
 	int index = 0;
 
 	while (token != NULL) {
-		if (index > tok_bufsize) {
+		if ((index >= tok_bufsize - 1)) {
 			tok_bufsize += tok_bufsize;
 			args = realloc(args, tok_bufsize * sizeof(char*));
 		}
 		args[index] = token;
-		token = strtok(NULL, " ");
+		token = strtok(NULL, TOK_DELIM);
 		index++;
 	}
 
+	args[index] = NULL;
 	*size = index;
 
 	return args;
@@ -353,7 +361,7 @@ char* readline() {
 	int ch;
 	int i = 0;
 	int buffer_size = READ_SIZE;
-	char* buffer = malloc(buffer_size * (sizeof(char)));
+	char* buffer = calloc(buffer_size, (sizeof(char)));
 
 	printf(" > ");
 

@@ -151,6 +151,7 @@ int extract_redirects(char** command) {
 
 	int size = find_size_and_check_for_redirect(command);
 
+	int flags = 0;
 	int com = 0;
 	int in = 1;
 	int out = 2;
@@ -159,7 +160,7 @@ int extract_redirects(char** command) {
 		return 0;
 	}
 
-	char*** args = calloc(size, sizeof(char**));
+	char*** args = calloc(3, sizeof(char**));
 
 	for (int k = 0; k < size; k++) {
 		args[k] = calloc((size + 1), sizeof(char*)); // room for *size words + NULL
@@ -177,6 +178,7 @@ int extract_redirects(char** command) {
 			redirects[redirects_found - 1] = command[i];
 			second_dimension_pointer = 0;
 			args[in][0] = command[i];
+			flags = O_RDONLY;
 			continue;
 
 		} else if (strcmp(command[i], ">") == 0) {
@@ -186,6 +188,8 @@ int extract_redirects(char** command) {
 			redirects[redirects_found - 1] = command[i];
 			second_dimension_pointer = 0;
 			args[redirects_found][second_dimension_pointer] = command[i];
+			args[out][0] = command[i];
+			flags = O_WRONLY | O_CREAT | O_TRUNC;
 			continue;
 
 		} else if (strcmp(command[i], ">>") == 0) {
@@ -195,6 +199,8 @@ int extract_redirects(char** command) {
 			redirects[redirects_found - 1] = command[i];
 			second_dimension_pointer = 0;
 			args[redirects_found][second_dimension_pointer] = command[i];
+			args[out][0] = command[i];
+			flags = O_WRONLY | O_CREAT | O_APPEND;
 			continue;
 		}
 
@@ -219,10 +225,8 @@ int exec_redir(char*** commands, int first_size, int redirect_found, char** deli
 
 		if (strcmp(delims[i], ">") == 0) {
 			out_file = commands[i + 1];
-			flags = O_WRONLY | O_CREAT | O_TRUNC;
 		} else if (strcmp(delims[i], ">>") == 0) {
 			out_file = commands[i + 1];
-			flags = O_WRONLY | O_CREAT | O_APPEND;
 		} else if (strcmp(delims[i], "<") == 0) {
 			in_file = commands[i + 1];
 		}

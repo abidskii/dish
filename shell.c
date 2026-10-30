@@ -49,7 +49,7 @@ int run(char** args, int* size) {
 	// Check for pipes
 	if (handle_delim(args, size, "|") == 0) {
 
-		if (handle_redirect(args) == 0) {
+		if (extract_redirects(args) == 0) {
 
 			exec(args);
 		}
@@ -162,7 +162,7 @@ int extract_redirects(char** command) {
 
 	char*** args = calloc(3, sizeof(char**));
 
-	for (int k = 0; k < size; k++) {
+	for (int k = 0; k < 3; k++) {
 		args[k] = calloc((size + 1), sizeof(char*)); // room for *size words + NULL
 	}
 	char** redirects = calloc(0, 0);
@@ -176,9 +176,12 @@ int extract_redirects(char** command) {
 			redirects_found++;
 			redirects = realloc(redirects, redirects_found * sizeof(char*));
 			redirects[redirects_found - 1] = command[i];
-			second_dimension_pointer = 0;
-			args[in][0] = command[i];
-			flags = O_RDONLY;
+			if (command[i + 1] == NULL) {
+				fprintf(stderr, "dish: expected a filename after \"%s\"\n", command[i]);
+				return -1; // or free what you allocated and return
+			}
+			args[in][0] = command[i + 1];
+			i++;
 			continue;
 
 		} else if (strcmp(command[i], ">") == 0) {
@@ -186,9 +189,12 @@ int extract_redirects(char** command) {
 			redirects_found++;
 			redirects = realloc(redirects, redirects_found * sizeof(char*));
 			redirects[redirects_found - 1] = command[i];
-			second_dimension_pointer = 0;
-			args[redirects_found][second_dimension_pointer] = command[i];
-			args[out][0] = command[i];
+			if (command[i + 1] == NULL) {
+				fprintf(stderr, "dish: expected a filename after \"%s\"\n", command[i]);
+				return -1; // or free what you allocated and return
+			}
+			args[out][0] = command[i + 1];
+			i++;
 			flags = O_WRONLY | O_CREAT | O_TRUNC;
 			continue;
 
@@ -197,40 +203,34 @@ int extract_redirects(char** command) {
 			redirects_found++;
 			redirects = realloc(redirects, redirects_found * sizeof(char*));
 			redirects[redirects_found - 1] = command[i];
-			second_dimension_pointer = 0;
-			args[redirects_found][second_dimension_pointer] = command[i];
-			args[out][0] = command[i];
+			if (command[i + 1] == NULL) {
+				fprintf(stderr, "dish: expected a filename after \"%s\"\n", command[i]);
+				return -1; // or free what you allocated and return
+			}
+			args[out][0] = command[i + 1];
+			i++;
 			flags = O_WRONLY | O_CREAT | O_APPEND;
 			continue;
 		}
 
-		args[redirects_found][second_dimension_pointer] = command[i];
+		args[com][second_dimension_pointer] = command[i];
 		second_dimension_pointer++;
 	}
 
-	exec_redir(args, redirects_found + 1, redirects_found, redirects);
-
+	// exec_redir(args, redirects_found + 1, redirects_found, redirects);
+	for (int k = 0; k < 3; k++) {
+		for (int j = 0; args[k][j] != NULL; j++) {
+			printf("args[%d][%d] = %s\n", k, j, args[k][j]);
+		}
+	}
 	return 1;
 }
 
-int exec_redir(char*** commands, int first_size, int redirect_found, char** delims) {
+int apply_redirects(char*** commands, char** out_file, char** in_file, char** delims) {
 
 	int fd[2];
 
 	int flags = 0;
-	char** in_file = NULL;
-	char** out_file = NULL;
-
-	for (int i = 0; i < redirect_found; i++) {
-
-		if (strcmp(delims[i], ">") == 0) {
-			out_file = commands[i + 1];
-		} else if (strcmp(delims[i], ">>") == 0) {
-			out_file = commands[i + 1];
-		} else if (strcmp(delims[i], "<") == 0) {
-			in_file = commands[i + 1];
-		}
-	}
 
 	int descriptor_in = -1;
 	int descriptor_out = -1;
@@ -293,7 +293,7 @@ int exec_pip(char*** commands, int first_size, int second_size, int splits_found
 
 		// Check for redirect
 
-		if (handle_redirect(commands[i]) == 1) {
+		if (extract_redirects(commands[i]) == 1) {
 			continue;
 		}
 

@@ -24,6 +24,7 @@ int apply_redirects(char*** commands, int * flags);
 int extract_redirects(char ** , char *** args, int * flags);
 int find_size_and_check_for_redirect(char **);
 void on_sigint(int sig);
+void redirect_in_child(char*** rows, int out_flags);
 int dish_exit(char** args);
 
 

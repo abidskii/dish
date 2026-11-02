@@ -181,6 +181,29 @@ int extract_redirects(char** command, char*** args, int* flags) {
 	return 0;
 }
 
+void redirect_in_child(char*** rows, int out_flags) {
+
+	if (rows[1][0] != NULL) {
+		int f = open(rows[1][0], O_RDONLY);
+		if (f == -1) {
+			perror(rows[1][0]);
+			exit(EXIT_FAILURE);
+		}
+		dup2(f, STDIN_FILENO);
+		close(f);
+	}
+
+	if (rows[2][0] != NULL) {
+		int f = open(rows[2][0], out_flags, 0644);
+		if (f == -1) {
+			perror(rows[2][0]);
+			exit(EXIT_FAILURE);
+		}
+		dup2(f, STDOUT_FILENO);
+		close(f);
+	}
+}
+
 int apply_redirects(char*** commands, int* flags) {
 
 	int fd[2];
@@ -249,61 +272,66 @@ int exec_pip(char*** commands, int first_size, int second_size, int splits_found
 	int prev_read = -1;
 
 	int status;
+	int started = 0;
 
 	pid_t wpid;
 	pid_t pid;
 	pid_t pids[first_size];
 
+	char*** rows[first_size];
+	int flags[first_size];
+
 	for (int i = 0; i < first_size; i++) {
+		rows[i] = calloc(3, sizeof(char**));
+		flags[i] = 0;
+		if (extract_redirects(commands[i], rows[i], &flags[i]) == -1)
+			return 1;
+		if (rows[i][0][0] == NULL) {
+			fprintf(stderr, "dish: missing command\n");
+			return 1;
+		}
+	}
 
-		if (pipe(fd) != 0) {
+	for (int i = 0; i < first_size; i++) {
+		int last = (i == first_size - 1);
+		int fd[2];
+
+		if (!last && pipe(fd) != 0) {
 			perror("dish");
+			break;
 		}
 
-		// Check for redirect
-		char*** args = calloc(3, sizeof(char**));
-		int flags;
-
-		if (extract_redirects(commands[i], args, &flags) == 1) {
-			continue;
-		}
-
-		pid = fork();
+		pid_t pid = fork();
 
 		if (pid == 0) {
-			if (i == 0) {
-				dup2(fd[1], STDOUT_FILENO);
-			} else if (i == first_size - 1) {
+			if (prev_read != -1) {
 				dup2(prev_read, STDIN_FILENO);
-			} else {
-				dup2(prev_read, STDIN_FILENO);
+				close(prev_read);
+			}
+			if (!last) {
 				dup2(fd[1], STDOUT_FILENO);
+				close(fd[0]);
+				close(fd[1]);
 			}
 
-			close(fd[0]);
-			close(fd[1]);
-			execvp(commands[i][0], commands[i]);
+			redirect_in_child(rows[i], flags[i]);
+
+			execvp(rows[i][0][0], rows[i][0]);
 			perror("dish");
 			exit(EXIT_FAILURE);
 		}
-		if (prev_read != -1) {
-			close(prev_read);
-		}
 
-		if (i != first_size - 1) {
+		pids[started++] = pid;
+
+		if (prev_read != -1)
+			close(prev_read);
+		if (!last) {
+			close(fd[1]);
 			prev_read = fd[0];
-			close(fd[1]);
-		} else {
-			close(fd[0]);
-			close(fd[1]);
 		}
-		pids[i] = pid;
 	}
 
-	close(fd[0]);
-	close(fd[1]);
-
-	for (int i = 0; i < first_size; i++) {
+	for (int i = 0; i < started; i++) {
 		while (waitpid(pids[i], NULL, 0) == -1 && errno == EINTR)
 			;
 	}

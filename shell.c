@@ -33,6 +33,7 @@ int cd(char** args) {
 }
 
 int dish_exit(char** args) {
+	(void)args;
 	write(STDOUT_FILENO, "\n", 1);
 	return 0;
 }
@@ -71,8 +72,6 @@ int handle_delim(char** args, int* size, char* delim) {
 			continue;
 		}
 		commands[splits_found][split_index] = args[i];
-		//		printf("%s ", commands[splits_found][split_index]);
-		//		printf("%d %d\n", splits_found, split_index);
 		split_index++;
 	}
 
@@ -95,10 +94,6 @@ int extract_redirects(char** command, char*** args, int* flags) {
 	int in = 1;
 	int out = 2;
 	*flags = 0;
-
-	if (size == -1) {
-		return 0;
-	}
 
 	for (int k = 0; k < 3; k++) {
 		args[k] = calloc((size + 1), sizeof(char*));
@@ -365,7 +360,7 @@ void on_sigint(int sig) {
 	write(STDOUT_FILENO, "\n", 1);
 }
 
-int main(int argc, char* argv[]) {
+int main() {
 
 	struct sigaction sa;
 	sa.sa_handler = on_sigint;
